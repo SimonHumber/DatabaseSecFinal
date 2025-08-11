@@ -126,6 +126,15 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('! CLEANUP_OLD_AUDIT_RECORDS procedure not found or already dropped');
     END;
 
+    -- Drop get student info procedure
+    BEGIN
+        EXECUTE IMMEDIATE 'DROP PROCEDURE SCHOOL_SCHEMA.GET_STUDENT_INFO';
+        DBMS_OUTPUT.PUT_LINE('✓ Dropped GET_STUDENT_INFO procedure');
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('! GET_STUDENT_INFO procedure not found or already dropped');
+    END;
+
     -- Drop get student GPA procedure
     BEGIN
         EXECUTE IMMEDIATE 'DROP PROCEDURE SCHOOL_SCHEMA.GET_STUDENT_GPA';

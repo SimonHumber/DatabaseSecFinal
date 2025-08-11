@@ -1,25 +1,8 @@
 -- =====================================================
 -- Comprehensive Database Security Implementation in Oracle 19c
 -- =====================================================
--- This script implements security measures for a school database to ensure data confidentiality,
--- integrity, and availability (CIA triad) in Oracle 19c
--- =====================================================
-
--- Connect as SYSDBA to perform administrative tasks
--- CONNECT / AS SYSDBA;
-
--- =====================================================
 -- 1. DATABASE CREATION & AUTHENTICATION SETUP
 -- =====================================================
-
--- Note: Using default Oracle tablespaces (SYSTEM, SYSAUX) instead of custom tablespaces
--- This simplifies the setup and works with any Oracle 19c installation
-
--- Create application schema (will use default tablespace)
-CREATE USER SCHOOL_SCHEMA IDENTIFIED BY "SecurePass123!"
-DEFAULT TABLESPACE USERS
-QUOTA UNLIMITED ON USERS
-PROFILE SECURE_PROFILE;
 
 -- Create secure profile with password policies
 CREATE PROFILE SECURE_PROFILE LIMIT
@@ -30,6 +13,13 @@ CREATE PROFILE SECURE_PROFILE LIMIT
     PASSWORD_LOCK_TIME 1
     PASSWORD_GRACE_TIME 7
     PASSWORD_VERIFY_FUNCTION ORA12C_VERIFY_FUNCTION;
+
+-- Create application schema (will use default tablespace)
+CREATE USER SCHOOL_SCHEMA IDENTIFIED BY "SecurePass123!"
+DEFAULT TABLESPACE USERS
+QUOTA UNLIMITED ON USERS
+PROFILE SECURE_PROFILE;
+
 
 -- =====================================================
 -- 2. USER ACCOUNTS AND AUTHENTICATION MECHANISMS
@@ -150,8 +140,8 @@ CREATE TABLE ENROLLMENTS (
     COURSE_ID NUMBER,
     ENROLLMENT_DATE DATE,
     GRADE VARCHAR2(2),
-    FINAL_SCORE NUMBER(5,2),
-    ATTENDANCE_PERCENTAGE NUMBER(5,2),
+    FINAL_SCORE NUMBER(5, 2),
+    ATTENDANCE_PERCENTAGE NUMBER(5, 2),
     CONSTRAINT FK_ENROLLMENTS_STUDENT FOREIGN KEY (STUDENT_ID) REFERENCES STUDENTS(STUDENT_ID),
     CONSTRAINT FK_ENROLLMENTS_COURSE FOREIGN KEY (COURSE_ID) REFERENCES COURSES(COURSE_ID)
 );
@@ -340,50 +330,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON COURSES TO ADMIN_ROLE;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON ENROLLMENTS TO ADMIN_ROLE;
 
--- Teacher Role privileges
-GRANT SELECT ON STUDENTS TO TEACHER_ROLE;
-
-GRANT SELECT ON TEACHERS TO TEACHER_ROLE;
-
-GRANT SELECT ON DEPARTMENTS TO TEACHER_ROLE;
-
-GRANT SELECT, INSERT, UPDATE ON COURSES TO TEACHER_ROLE;
-
-GRANT SELECT, INSERT, UPDATE ON ENROLLMENTS TO TEACHER_ROLE;
-
--- Counselor Role privileges
-GRANT SELECT, INSERT, UPDATE ON STUDENTS TO COUNSELOR_ROLE;
-
-GRANT SELECT ON TEACHERS TO COUNSELOR_ROLE;
-
-GRANT SELECT ON DEPARTMENTS TO COUNSELOR_ROLE;
-
-GRANT SELECT ON COURSES TO COUNSELOR_ROLE;
-
-GRANT SELECT, INSERT, UPDATE ON ENROLLMENTS TO COUNSELOR_ROLE;
-
--- Registrar Role privileges
-GRANT SELECT, INSERT, UPDATE ON STUDENTS TO REGISTRAR_ROLE;
-
-GRANT SELECT ON TEACHERS TO REGISTRAR_ROLE;
-
-GRANT SELECT ON DEPARTMENTS TO REGISTRAR_ROLE;
-
-GRANT SELECT, INSERT, UPDATE ON COURSES TO REGISTRAR_ROLE;
-
-GRANT SELECT, INSERT, UPDATE ON ENROLLMENTS TO REGISTRAR_ROLE;
-
--- Read-only Role privileges
-GRANT SELECT ON STUDENTS TO READ_ONLY_ROLE;
-
-GRANT SELECT ON TEACHERS TO READ_ONLY_ROLE;
-
-GRANT SELECT ON DEPARTMENTS TO READ_ONLY_ROLE;
-
-GRANT SELECT ON COURSES TO READ_ONLY_ROLE;
-
-GRANT SELECT ON ENROLLMENTS TO READ_ONLY_ROLE;
-
 -- Audit Role privileges
 GRANT SELECT ON DBA_AUDIT_TRAIL TO AUDIT_ROLE;
 
@@ -397,22 +343,10 @@ GRANT SELECT ON DBA_AUDIT_POLICIES TO AUDIT_ROLE;
 -- Note: SIN is encrypted using Oracle's built-in encryption
 
 -- Redact student addresses (partial redaction)
-DBMS_REDACT.ADD_POLICY(
-    object_schema => 'SCHOOL_SCHEMA',
-    object_name => 'STUDENTS',
-    column_name => 'ADDRESS',
-    policy_name => 'student_address_redaction',
-    function_type => DBMS_REDACT.PARTIAL,
-    function_parameters => DBMS_REDACT.PARTIAL_PARAMS(
-        function_type => DBMS_REDACT.PARTIAL_STREET_ADDRESS,
-        start_length => 0,
-        end_length => 0,
-        start_delimiter => '',
-        end_delimiter => '',
-        end_delimiter_length => 0
-    ),
-    expression => 'SYS_CONTEXT(''USERENV'', ''SESSION_USER'') NOT IN (''ADMIN_USER'', ''COUNSELOR_USER'')'
-);
+BEGIN
+    SYS.DBMS_REDACT.ADD_POLICY( OBJECT_SCHEMA => 'SYSTEM', OBJECT_NAME => 'STUDENTS', COLUMN_NAME => 'ADDRESS', POLICY_NAME => 'student_address_redaction', FUNCTION_TYPE => SYS.DBMS_REDACT.NULLIFY, EXPRESSION => 'SYS_CONTEXT(''USERENV'', ''SESSION_USER'') NOT IN (''ADMIN_USER'', ''COUNSELOR_USER'')' );
+END;
+/
 
 -- =====================================================
 -- 7. AUDIT POLICIES IMPLEMENTATION
@@ -424,14 +358,14 @@ ALTER SYSTEM SET AUDIT_TRAIL=DB, EXTENDED SCOPE=SPFILE;
 -- Create audit policies
 CREATE AUDIT POLICY STUDENT_ACCESS_POLICY
     ACTIONS SELECT, INSERT, UPDATE, DELETE
-    ON SCHOOL_SCHEMA.STUDENTS
-    WHEN 'SYS_CONTEXT(''USERENV'', ''SESSION_USER'') != ''SCHOOL_SCHEMA'''
+    ON SYSTEM.STUDENTS
+    WHEN 'SYS_CONTEXT(''USERENV'', ''SESSION_USER'') != ''SYSTEM'''
     EVALUATE PER STATEMENT;
 
 CREATE AUDIT POLICY GRADE_ACCESS_POLICY
     ACTIONS SELECT, INSERT, UPDATE, DELETE
-    ON SCHOOL_SCHEMA.ENROLLMENTS
-    WHEN 'SYS_CONTEXT(''USERENV'', ''SESSION_USER'') != ''SCHOOL_SCHEMA'''
+    ON SYSTEM.ENROLLMENTS
+    WHEN 'SYS_CONTEXT(''USERENV'', ''SESSION_USER'') != ''SYSTEM'''
     EVALUATE PER STATEMENT;
 
 CREATE AUDIT POLICY LOGIN_AUDIT_POLICY
@@ -444,17 +378,19 @@ CREATE AUDIT POLICY PRIVILEGE_AUDIT_POLICY
     WHEN 'SYS_CONTEXT(''USERENV'', ''SESSION_USER'') IN (''ADMIN_USER'', ''COUNSELOR_USER'')'
     EVALUATE PER STATEMENT;
 
--- privilege audit policy
+-- Privilege audit policy
 -- Create policy to monitor role grants and privilege changes
+-- This did not work
 CREATE AUDIT POLICY PRIV_ESCALATION
   ACTIONS
-    GRANT ANY PRIVILEGE,
-    GRANT ANY ROLE,
+    GRANT,
+    REVOKE,
     ALTER USER,
     CREATE USER,
     DROP USER,
     CREATE ROLE,
-    DROP ROLE;
+    DROP ROLE
+  EVALUATE PER STATEMENT;
 
 -- Enable the policy
 AUDIT POLICY PRIV_ESCALATION;
@@ -470,8 +406,17 @@ FROM
 ORDER BY
     EVENT_TIMESTAMP DESC;
 
--- roles needed policies
+-- Roles needed policies:
 -- User who manages audit config
+-- Add users
+CREATE USER KEMAL IDENTIFIED BY "StrongPass1!";
+
+GRANT CREATE SESSION TO KEMAL;
+
+CREATE USER RAVI IDENTIFIED BY "StrongPass2!";
+
+GRANT CREATE SESSION TO RAVI;
+
 GRANT AUDIT_ADMIN TO KEMAL;
 
 -- User who views audit logs
@@ -489,6 +434,40 @@ AUDIT POLICY PRIVILEGE_AUDIT_POLICY;
 -- =====================================================
 -- 8. DEFINER'S AND INVOKER'S RIGHTS PROCEDURES
 -- =====================================================
+
+-- Create secure procedure for getting student information
+CREATE OR REPLACE PROCEDURE GET_STUDENT_INFO(
+    P_STUDENT_ID IN NUMBER,
+    P_FIRST_NAME OUT VARCHAR2,
+    P_LAST_NAME OUT VARCHAR2,
+    P_EMAIL OUT VARCHAR2,
+    P_GRADE_LEVEL OUT NUMBER,
+    P_GPA OUT NUMBER
+)
+    AUTHID DEFINER AS
+BEGIN
+ 
+    -- Only authorized users can access student information
+    IF SYS_CONTEXT('USERENV', 'SESSION_USER') IN ('ADMIN_USER', 'TEACHER_USER', 'COUNSELOR_USER', 'REGISTRAR_USER') THEN
+        SELECT
+            FIRST_NAME,
+            LAST_NAME,
+            EMAIL,
+            GRADE_LEVEL,
+            GPA INTO P_FIRST_NAME,
+            P_LAST_NAME,
+            P_EMAIL,
+            P_GRADE_LEVEL,
+            P_GPA
+        FROM
+            SCHOOL_SCHEMA.STUDENTS
+        WHERE
+            STUDENT_ID = P_STUDENT_ID;
+    ELSE
+        RAISE_APPLICATION_ERROR(-20000, 'Insufficient privileges to access student information');
+    END IF;
+END;
+/
 
 -- Create secure procedure with definer's rights (default)
 CREATE OR REPLACE PROCEDURE GET_STUDENT_GPA(
@@ -542,7 +521,7 @@ CREATE OR REPLACE PROCEDURE ENROLL_STUDENT_IN_COURSE(
     V_COURSE_EXISTS    NUMBER;
     V_ALREADY_ENROLLED NUMBER;
 BEGIN
-
+ 
     -- Check if student exists
     SELECT
         COUNT(*) INTO V_STUDENT_EXISTS
@@ -553,7 +532,7 @@ BEGIN
     IF V_STUDENT_EXISTS = 0 THEN
         RAISE_APPLICATION_ERROR(-20003, 'Student not found');
     END IF;
-
+ 
 
     -- Check if course exists
     SELECT
@@ -565,7 +544,7 @@ BEGIN
     IF V_COURSE_EXISTS = 0 THEN
         RAISE_APPLICATION_ERROR(-20004, 'Course not found');
     END IF;
-
+ 
 
     -- Check if already enrolled
     SELECT
@@ -578,15 +557,25 @@ BEGIN
     IF V_ALREADY_ENROLLED > 0 THEN
         RAISE_APPLICATION_ERROR(-20005, 'Student already enrolled in this course');
     END IF;
+ 
 
     -- Create enrollment (ID is automatically generated)
-    INSERT INTO SCHOOL_SCHEMA.ENROLLMENTS (STUDENT_ID, COURSE_ID, ENROLLMENT_DATE)
-    VALUES (P_STUDENT_ID, P_COURSE_ID, SYSDATE);
+    INSERT INTO SCHOOL_SCHEMA.ENROLLMENTS (
+        STUDENT_ID,
+        COURSE_ID,
+        ENROLLMENT_DATE
+    ) VALUES (
+        P_STUDENT_ID,
+        P_COURSE_ID,
+        SYSDATE
+    );
     COMMIT;
 END;
 /
 
 -- Grant execute privileges
+GRANT EXECUTE ON GET_STUDENT_INFO TO ADMIN_ROLE, TEACHER_ROLE, COUNSELOR_ROLE, REGISTRAR_ROLE;
+
 GRANT EXECUTE ON GET_STUDENT_GPA TO ADMIN_ROLE, TEACHER_ROLE, COUNSELOR_ROLE;
 
 GRANT EXECUTE ON UPDATE_STUDENT_GRADE TO TEACHER_ROLE, ADMIN_ROLE;
@@ -596,9 +585,6 @@ GRANT EXECUTE ON ENROLL_STUDENT_IN_COURSE TO REGISTRAR_ROLE, ADMIN_ROLE;
 -- =====================================================
 -- 9. BACKUP AND RESTORE PLANNING
 -- =====================================================
-
--- Create backup directory
--- CREATE OR REPLACE DIRECTORY backup_dir AS '/u01/app/oracle/backup';
 
 -- Create backup procedure
 CREATE OR REPLACE PROCEDURE BACKUP_SCHOOL_DATA AS
@@ -626,7 +612,7 @@ CREATE OR REPLACE PROCEDURE RESTORE_SCHOOL_DATA(
 ) AS
 BEGIN
  
-    -- Import school data (this would be executed from OS level)
+    -- Import school data
     -- impdp school_schema/password@ORCL directory=backup_dir dumpfile=p_backup_file
     DBMS_OUTPUT.PUT_LINE('Restore from file: '
                          || P_BACKUP_FILE);
@@ -650,7 +636,7 @@ SELECT
     ADDRESS,
     PARENT_PHONE
 FROM
-    SCHOOL_SCHEMA.STUDENTS
+    STUDENTS
 WHERE
     STUDENT_ID = 2001;
 
@@ -659,17 +645,18 @@ WHERE
 -- SELECT * FROM students;
 
 -- 3. Test audit trail
-SELECT
-    USERNAME,
-    ACTION_NAME,
-    OBJ_NAME,
-    TIMESTAMP
+--LOGINTOAW
+USER ACCOUNTDIT VIEWLOGEIN TO ASELECT
+ERNAME,
+ON_NAME,
+CT_NAME,
+T_TIMESTAMP
 FROM
-    UNIFIED_AUDIT_TRAIL
+IED_AUDIT_TRAIL
 WHERE
-    USERNAME IN ('ADMIN_USER', 'TEACHER_USER', 'COUNSELOR_USER', 'REGISTRAR_USER', 'READ_ONLY_USER')
+ERNAME IN ('ADMIN_USER', 'TEACHER_USER', 'COUNSELOR_USER', 'REGISTRAR_USER', 'READ_ONLY_USER')
 ORDER BY
-    TIMESTAMP DESC;
+T_TIMESTAMP DESC;
 
 -- 4. Test procedure access
 -- DECLARE
@@ -698,7 +685,7 @@ WHERE
 ORDER BY
     TIMESTAMP DESC;
 
--- Monitor privilege escalations
+--Did not do --- Monitor privilege escalations
 SELECT
     USERNAME,
     ACTION_NAME,
@@ -713,59 +700,36 @@ ORDER BY
 
 -- Monitor data access patterns
 SELECT
-    USERNAME,
+    DBUSERNAME,
     ACTION_NAME,
-    OBJ_NAME,
-    TIMESTAMP
+    OBJECT_NAME,
+    EVENT_TIMESTAMP
 FROM
     UNIFIED_AUDIT_TRAIL
 WHERE
-    OBJ_NAME IN ('STUDENTS', 'ENROLLMENTS')
+    OBJECT_NAME IN ('STUDENTS', 'ENROLLMENTS')
 ORDER BY
-    TIMESTAMP DESC;
+    EVENT_TIMESTAMP DESC;
 
 -- Check for unusual access times
 SELECT
-    USERNAME,
+    DBUSERNAME,
     ACTION_NAME,
-    OBJ_NAME,
-    TIMESTAMP
+    OBJECT_NAME,
+    EVENT_TIMESTAMP
 FROM
     UNIFIED_AUDIT_TRAIL
 WHERE
-    EXTRACT(HOUR FROM TIMESTAMP) NOT BETWEEN 7 AND 18
+    EXTRACT(HOUR FROM EVENT_TIMESTAMP) NOT BETWEEN 7 AND 18
 ORDER BY
-    TIMESTAMP DESC;
+    EVENT_TIMESTAMP DESC;
+
+ND 18
+ORDER BY
+TIMESTAMP DESC;
 
 -- =====================================================
--- 12. CLEANUP AND MAINTENANCE PROCEDURES
--- =====================================================
-
--- Procedure to clean old audit records (older than 90 days)
-CREATE OR REPLACE PROCEDURE CLEANUP_OLD_AUDIT_RECORDS AS
-BEGIN
-    DELETE FROM UNIFIED_AUDIT_TRAIL
-    WHERE
-        TIMESTAMP < SYSDATE - 90;
-    COMMIT;
-    DBMS_OUTPUT.PUT_LINE('Old audit records cleaned up');
-END;
-/
-
--- Schedule cleanup job (run weekly)
--- BEGIN
---     DBMS_SCHEDULER.CREATE_JOB(
---         job_name => 'CLEANUP_AUDIT_JOB',
---         job_type => 'STORED_PROCEDURE',
---         job_action => 'cleanup_old_audit_records',
---         repeat_interval => 'FREQ=WEEKLY; BYDAY=SUN; BYHOUR=2',
---         enabled => TRUE
---     );
--- END;
--- /
-
--- =====================================================
--- 13. SECURITY DOCUMENTATION QUERIES
+-- 12. SECURITY DOCUMENTATION QUERIES
 -- =====================================================
 
 -- List all audit policies
